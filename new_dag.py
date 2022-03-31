@@ -24,6 +24,7 @@ with DAG(dag_id='new_dag', schedule_interval='0 0 * * *', default_args=default_a
 
     task_6 = BashOperator(task_id='task_6', bash_command='sleep 60')
 
-    tasks >> [task_4, task_5]
+    tasks >> task_4
+    tasks >> task_5
     [task_4, task_5] >> task_6
         
