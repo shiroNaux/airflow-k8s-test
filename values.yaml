@@ -220,7 +220,7 @@ rbac:
 
 # Airflow executor
 # Options: LocalExecutor, CeleryExecutor, KubernetesExecutor, CeleryKubernetesExecutor
-executor: "KubernetesExecutor"
+executor: "CeleryExecutor"
 
 # If this is true and using LocalExecutor/KubernetesExecutor/CeleryKubernetesExecutor, the scheduler's
 # service account will have access to communicate with the api-server and launch pods.
@@ -563,7 +563,23 @@ scheduler:
     timeoutSeconds: 20
     failureThreshold: 5
     periodSeconds: 60
-    command: ~
+    command:
+      - sh
+      - -c
+      - |
+        CONNECTION_CHECK_MAX_COUNT=0 exec /entrypoint python -Wignore -c "
+        import os
+        os.environ['AIRFLOW__CORE__LOGGING_LEVEL'] = 'ERROR'
+        os.environ['AIRFLOW__LOGGING__LOGGING_LEVEL'] = 'ERROR'
+        from airflow.jobs.scheduler_job import SchedulerJob
+        from airflow.utils.db import create_session
+        from airflow.utils.net import get_hostname
+        import sys
+        with create_session() as session:
+            job = session.query(SchedulerJob).filter_by(hostname=get_hostname()).order_by(
+                SchedulerJob.latest_heartbeat.desc()).limit(1).first()
+        sys.exit(0 if job.is_alive() else 1)"
+
   # Airflow 2.0 allows users to run multiple schedulers,
   # However this feature is only recommended for MySQL 8+ and Postgres
   replicas: 1
@@ -661,10 +677,6 @@ scheduler:
     #   cpu: 100m
     #   memory: 128Mi
 
-  waitForMigrations:
-    # Whether to create init container to wait for db migrations
-    enabled: true
-
 # Airflow create user job settings
 createUserJob:
   # Command to use when running the create user job (templated).
@@ -737,7 +749,6 @@ createUserJob:
 
 # Airflow database migration job settings
 migrateDatabaseJob:
-  enabled: true
   # Command to use when running the migrate database job (templated).
   command: ~
   # Args to use when running the migrate database job (templated).
@@ -826,14 +837,6 @@ webserver:
 
     # Annotations to add to webserver kubernetes service account.
     annotations: {}
-
-  # Webserver pod disruption budget
-  podDisruptionBudget:
-    enabled: false
-
-    # PDB configuration
-    config:
-      maxUnavailable: 1
 
   # Allow overriding Update Strategy for Webserver
   strategy: ~
@@ -933,10 +936,6 @@ webserver:
 
   podAnnotations: {}
 
-  waitForMigrations:
-    # Whether to create init container to wait for db migrations
-    enabled: true
-
 # Airflow Triggerer Config
 triggerer:
   enabled: true
@@ -961,7 +960,26 @@ triggerer:
     timeoutSeconds: 20
     failureThreshold: 5
     periodSeconds: 60
-    command: ~
+    command:
+      - sh
+      - -c
+      - |
+        CONNECTION_CHECK_MAX_COUNT=0 exec /entrypoint python -Wignore -c "
+        import os
+        os.environ['AIRFLOW__CORE__LOGGING_LEVEL'] = 'ERROR'
+        os.environ['AIRFLOW__LOGGING__LOGGING_LEVEL'] = 'ERROR'
+
+        from airflow.jobs.triggerer_job import TriggererJob
+        from airflow.utils.db import create_session
+        from airflow.utils.net import get_hostname
+        import sys
+
+        with create_session() as session:
+            job = session.query(TriggererJob).filter_by(hostname=get_hostname()).order_by(
+                TriggererJob.latest_heartbeat.desc()).limit(1).first()
+
+        sys.exit(0 if job.is_alive() else 1)
+        "
 
   # Create ServiceAccount
   serviceAccount:
@@ -1022,15 +1040,11 @@ triggerer:
 
   podAnnotations: {}
 
-  waitForMigrations:
-    # Whether to create init container to wait for db migrations
-    enabled: true
-
 # Flower settings
 flower:
   # Enable flower.
   # If True, and using CeleryExecutor/CeleryKubernetesExecutor, will deploy flower app.
-  enabled: false
+  enabled: true
 
   # Command to use when running flower (templated).
   command: ~
@@ -1107,7 +1121,6 @@ flower:
   extraContainers: []
   # Mount additional volumes into the flower pods.
   extraVolumes: []
-  extraVolumeMounts: []
 
   # Select certain nodes for airflow flower pods.
   nodeSelector: {}
@@ -1172,8 +1185,6 @@ pgbouncer:
   command: ["pgbouncer", "-u", "nobody", "/etc/pgbouncer/pgbouncer.ini"]
   # Args to use for PgBouncer(templated).
   args: ~
-  auth_type: md5
-  auth_file: /etc/pgbouncer/users.txt
 
   # Create ServiceAccount
   serviceAccount:
@@ -1531,24 +1542,22 @@ dags:
     accessMode: ReadWriteOnce
     ## the name of an existing PVC to use
     existingClaim:
-    ## optional subpath for dag volume mount
-    subPath: ~
   gitSync:
-    enabled: true
+    enabled: false
 
     # git repo clone url
     # ssh examples ssh://git@github.com/apache/airflow.git
     # git@github.com:apache/airflow.git
     # https example: https://github.com/apache/airflow.git
-    repo: git@github.com:shiroNaux/airflow-k8s-test.git
-    branch: main
+    repo: https://github.com/apache/airflow.git
+    branch: v2-2-stable
     rev: HEAD
     depth: 1
     # the number of consecutive failures allowed before aborting
     maxFailures: 0
     # subpath within the repo where dags are located
     # should be "" if dags are at repo root
-    subPath: ""
+    subPath: "tests/dags"
     # if your repo needs a user name password
     # you can load them to a k8s secret like the one below
     #   ---
@@ -1575,7 +1584,7 @@ dags:
     #     # key needs to be gitSshKey
     #     gitSshKey: <base64_encoded_data>
     # and specify the name of the secret below
-    sshKeySecret: airflow-ssh-git-secret
+    # sshKeySecret: airflow-ssh-secret
     #
     # If you are using an ssh private key, you can additionally
     # specify the content of your known_hosts file, example:
@@ -1613,3 +1622,4 @@ logs:
     storageClassName:
     ## the name of an existing PVC to use
     existingClaim:
+
