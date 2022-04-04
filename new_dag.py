@@ -20,7 +20,7 @@ with DAG(dag_id='new_dag', schedule_interval='0 0 * * *', default_args=default_a
 
     task_4 = PythonOperator(task_id='task_4', python_callable=process, op_args=['my super parameter'])
 
-    task_5 = BashOperator(task_id='task_5', bash_command='echo "pipeline done"')
+    task_5 = BashOperator(task_id='task_5', bash_command='echo $(node -v)')
 
     task_6 = BashOperator(task_id='task_6', bash_command='sleep 60')
 
